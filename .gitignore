@@ -1,0 +1,3 @@
+# don't want to upload actual data
+*.tsv
+*.csv
