@@ -33,7 +33,7 @@ my $sgvPath = "$rootPath/$donor/$sample/$seqType/$aligner/final_gatk-germline/$s
 my $svPath = "$rootPath/$donor/$sample/$seqType/$aligner/final_crest-delly/$sample.annotatedSV.tsv";
 my $paramPath = "$rootPath/$donor/$sample/$seqType/$aligner/celluloid/v11.2/solution/parameters_$sample.txt";
 my $segPath = "$rootPath/$donor/$sample/$seqType/$aligner/celluloid/v11.2/solution/segments_$sample.txt.sorted.bed.gz";
-my $neoPaths = "$rootPath/$donor/$sample/$seqType/$aligner/netMHC/pan-2.8/polysolver/1.0/$sample.*.txt";
+my $neoPaths = "$rootPath/$donor/$sample/$seqType/$aligner/netMHC/pan-2.8/polysolver/1.0/";
 my $xenomePaths = "$rootPath/$donor/$sample/$seqType/xenome/1.0.1-r/*.log";
 my $cosmicSignnlsPath = "$rootPath/$donor/$sample/$seqType/$aligner/cosmicSigNNLS/${sample}_signatures.txt";
 
@@ -101,7 +101,7 @@ parseParams($paramPath,\%data);
 
 parseSegs($segPath,\%data,\%vars,\%genes);
 
-parseNeo($neoPaths,\%data);
+parseNeo($neoPaths,\%data,\%vars);
 
 if (($sample =~ /_X/) or ($sample =~ /Pa_O/))
 {
@@ -202,7 +202,7 @@ close FILE;
 open (FILE, ">$variantsFile") or die "Couldn't open $variantsFile\n";
 
 my @everyLine = qw/donor tumour normal seq_type tumour_coverage normal_coverage cellularity ploidy/;
-@headers = qw/gene copy_number ab_counts mutation_class mutation_type position fusion_genes base_change tumour_freq tumour_depth normal_freq normal_depth nuc_context aa_context dbsnp cosmic cadd_phred rarity 1000G_all ExAC_all ESP6500siv2_all clinvar gene_position maf_mean maf_p cosmic_census_flag cosmic_census_data/;
+@headers = qw/gene copy_number ab_counts mutation_class mutation_type position fusion_genes base_change tumour_freq tumour_depth normal_freq normal_depth nuc_context aa_context dbsnp cosmic neoantigen cadd_phred rarity 1000G_all ExAC_all ESP6500siv2_all clinvar gene_position maf_mean maf_p cosmic_census_flag cosmic_census_data/;
 
 $outLine = "";
 for my $type (@everyLine)
@@ -1732,7 +1732,14 @@ sub parseSegs
 
 						$vars->{$gene}{copy_number} .= "|" . sprintf("%.3f",$f[11]);
 						$vars->{$gene}{maf_mean} .= "|" . sprintf("%.3f",$f[9]);
-						$vars->{$gene}{maf_p} .= "|" . sprintf("%.3f",$f[10]);
+						unless ($f[10] eq "NA")
+						{
+							$vars->{$gene}{maf_p} .= "|" . sprintf("%.3f",$f[10]);
+						}
+						else
+						{
+							$vars->{$gene}{maf_p} .= "|NA";
+						}
 						$vars->{$gene}{ab_counts} .= "|" . $f[12];
 
 						$position .= "|$f[0]:$f[1]-$f[2]";
@@ -1741,8 +1748,22 @@ sub parseSegs
 					else
 					{
 						$vars->{$gene}{copy_number} = sprintf("%.3f",$f[11]);
-						$vars->{$gene}{maf_mean} = sprintf("%.3f",$f[9]);
-						$vars->{$gene}{maf_p} = sprintf("%.3f",$f[10]);
+						unless ($f[9] eq "NA")
+						{
+							$vars->{$gene}{maf_mean} = sprintf("%.3f",$f[9]);
+						}
+						else
+						{
+							$vars->{$gene}{maf_mean} = $f[9];
+						}
+						unless ($f[10] eq "NA")
+						{
+							$vars->{$gene}{maf_p} = sprintf("%.3f",$f[10]);
+						}
+						else
+						{
+							$vars->{$gene}{maf_p} = $f[10];
+						}
 						$vars->{$gene}{ab_counts} = $f[12];
 						$position = "$f[0]:$f[1]-$f[2]";
 					}
@@ -1817,14 +1838,18 @@ sub parseParams
 
 sub parseNeo
 {
-	my $files = shift;
+	my $path = shift;
 	my $data = shift;
+	my $vars = shift;
 
-	$data->{neo_files} = $files;
+	$data->{neo_path} = $path;
 
 	my $l;
 
-	my $ls = `ls $files`;
+	my %neoList;
+	my %varList;
+
+	my $ls = `ls $path/$sample.*.txt`;
 	chomp $ls;
 
 	for my $file (split(/\n/, $ls))
@@ -1833,7 +1858,12 @@ sub parseNeo
 	
 		while ($l = <FILE>)
 		{
-			if ($l =~ /^Protein PEPLIST\. Allele (.*?)\. Number of high binders (.*?)\. Number of weak binders (.*?)\. Number of peptides .*?$/)
+			#     0  HLA-A*02:01    AAERQELGG         PEPLIST         0.008     45729.24    50.00
+			if ($l =~ /.*?(HLA-.*?)  *(.*?)  *?PEPLIST.* <=/)
+			{
+				$neoList{$2}{$1}++;
+			}
+			elsif ($l =~ /^Protein PEPLIST\. Allele (.*?)\. Number of high binders (.*?)\. Number of weak binders (.*?)\. Number of peptides .*?$/)
 			{
 				$data->{neo_antigens} += $2 + $3;
 				$data->{neo_antigens_weak} += $3;
@@ -1844,6 +1874,56 @@ sub parseNeo
 
 		close FILE;
 	}
+
+	# read peptide map to collect variants for neo-antigens
+	open (FILE, "$path/$sample.peptideMap") or die "Couldn't open $path/$sample.peptideMap\n";
+
+	my ($chr,$pos,$ref,$alt,$pep);
+	while ($l = <FILE>)
+	{
+		chomp $l;
+		($chr,$pos,$ref,$alt,$pep) = split(/\t/, $l);
+
+		if (exists $neoList{$pep})
+		{
+			for my $hla (sort keys %{ $neoList{$pep} })
+			{
+				$varList{"$chr:$pos\t$ref>$alt"}{$pep}{$hla}++;
+			}
+		}
+	}
+
+	close FILE;
+	
+	
+	# go through variant hash (somatic noncoding, specifically) and add field for predicted neo-antigens to those that match %neoList and the peptide map
+	
+	for my $gene (keys %{ $vars })
+	{
+		for my $varName (keys %{ $vars->{$gene}{variants} })
+		{
+			if (($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic snv") or ($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic indel"))
+			{
+				$pos = $vars->{$gene}{variants}{$varName}{position};
+				$alt = $vars->{$gene}{variants}{$varName}{base_change};
+
+				if (exists $varList{"$pos\t$alt"})
+				{
+					for $pep (sort keys %{ $varList{"$pos\t$alt"} })
+					{
+						for my $hla (sort keys %{ $varList{"$pos\t$alt"}{$pep} })
+						{
+							$vars->{$gene}{variants}{$varName}{neoantigen} .= "$hla>$pep;";
+						}
+					}
+					$vars->{$gene}{variants}{$varName}{neoantigen} =~ s/;$//;
+				}
+			}
+		}
+	}
+
+
+
 
 	$data->{hla_types} =~ s/\|$//;
 
@@ -2695,7 +2775,6 @@ sub doHallmarkScoring
 		}
 
 		# loh
-		print "Testing $g ab: $vars->{$g}{ab_counts}\n";
 		if ($vars->{$g}{ab_counts} =~ /^0\./)
 		{
 			$geneHits{$g}++;
