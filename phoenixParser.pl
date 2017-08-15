@@ -676,7 +676,10 @@ sub parseSSM
 							}
 						}
 					}
-
+					elsif ($consequence =~ /^unknown/)
+					{
+						$mutType = "unknown";		# shrug...
+					}
 
 					unless ($mutType eq "")
 					{
