@@ -201,7 +201,7 @@ close FILE;
 
 open (FILE, ">$variantsFile") or die "Couldn't open $variantsFile\n";
 
-my @everyLine = qw/donor tumour normal seq_type tumour_coverage normal_coverage cellularity ploidy/;
+my @everyLine = qw/donor tumour normal external_id seq_type tumour_coverage normal_coverage cellularity ploidy/;
 @headers = qw/gene copy_number ab_counts mutation_class mutation_type position fusion_genes base_change tumour_freq tumour_depth normal_freq normal_depth nuc_context aa_context dbsnp cosmic neoantigen cadd_phred rarity 1000G_all ExAC_all ESP6500siv2_all clinvar gene_position maf_mean maf_p cosmic_census_flag cosmic_census_data/;
 
 $outLine = "";
