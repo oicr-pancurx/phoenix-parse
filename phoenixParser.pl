@@ -1590,7 +1590,6 @@ sub parseSV
 				{
 					for $gene (split(/\|/, $near1))
 					{
-						$varName = "$varName fusion";
 						$vars->{$gene}{variants}{$varName}{mutation_class} = "somatic sv";
 						$vars->{$gene}{variants}{$varName}{mutation_type} = "$prettyType{$type} potential fusion";
 						$vars->{$gene}{variants}{$varName}{position} = "$chr1:$pos1-$chr2:$pos2";
