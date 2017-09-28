@@ -99,9 +99,24 @@ parseSV($svPath,\%data,\%vars,\%genes);
 
 parseParams($paramPath,\%data);
 
+			if (exists $vars{ARID1A}{variants})
+			{
+				warn "ARID1A variants exist before segs\n";
+			}
+
 parseSegs($segPath,\%data,\%vars,\%genes);
 
+			if (exists $vars{ARID1A}{variants})
+			{
+				warn "ARID1A variants exist after segs\n";
+			}
+
 parseNeo($neoPaths,\%data,\%vars);
+
+			if (exists $vars{ARID1A}{variants})
+			{
+				warn "ARID1A variants exist after neo\n";
+			}
 
 if (($sample =~ /_X/) or ($sample =~ /Pa_O/))
 {
@@ -221,6 +236,10 @@ for my $gene (sort comparePos keys %vars)
 {
 	if (exists $vars{$gene}{variants})
 	{
+		if ($gene eq "ARID1A")
+		{
+			warn "$gene\t$vars{$gene}{copy_number}\n";
+		}
 		for my $var (sort keys %{ $vars{$gene}{variants} })
 		{
 			$outLine = "";
@@ -1702,6 +1721,7 @@ sub parseSegs
 
 	my $ploidyFoldAmp = ($data->{ploidy} * 4) - 0.5;
 	my $multiSeg;
+	my $homdel;
 
 	my $position;
 
@@ -1722,14 +1742,25 @@ sub parseSegs
 			$end = $3;
 
 			$multiSeg = 0;
+			$homdel = 0;
 			$position = "";
+	
 	
 			$iter = $tabix->query($chr,$start,$end);
 			if (defined $iter->{"_"})
 			{
 				while ($l = $tabix->read($iter))
 				{
+						# chr1    23918001        33076000        9158000 p       PCSI_0652_Pa_P_526      0.875   0.981165109381573       FALSE   0.4221  0.37697585636584        1.61472711055046        1.1
+
 					@f = split(/\t/, $l);
+					unless ($f[11] eq "NA")
+					{
+						if ($f[11] <= 0)
+						{
+							$homdel = 1;
+						}
+					}
 					if (exists $vars->{$gene}{copy_number})
 					{
 
@@ -1751,6 +1782,7 @@ sub parseSegs
 					else
 					{
 						$vars->{$gene}{copy_number} = sprintf("%.3f",$f[11]);
+
 						unless ($f[9] eq "NA")
 						{
 							$vars->{$gene}{maf_mean} = sprintf("%.3f",$f[9]);
@@ -1774,7 +1806,7 @@ sub parseSegs
 
 				if ((exists $vars->{$gene}{ab_counts}) and (exists $vars->{$gene}{copy_number}))
 				{
-					if ($vars->{$gene}{ab_counts} =~ /0\.0/)
+					if (($vars->{$gene}{ab_counts} =~ /0\.0/) or ($homdel == 1))
 					{
 						$vars->{$gene}{variants}{"CNV homozygous deletion"}{mutation_class} = "somatic cnv";
 						$vars->{$gene}{variants}{"CNV homozygous deletion"}{mutation_type} = "homozygous deletion";
@@ -1899,27 +1931,35 @@ sub parseNeo
 	close FILE;
 	
 	
+			if (exists $vars->{ARID1A}{variants})
+			{
+				warn "ARID1A variants exist before matching neo\n";
+			}
+
 	# go through variant hash (somatic noncoding, specifically) and add field for predicted neo-antigens to those that match %neoList and the peptide map
 	
 	for my $gene (keys %{ $vars })
 	{
-		for my $varName (keys %{ $vars->{$gene}{variants} })
+		if (exists $vars->{$gene}{variants})
 		{
-			if (($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic snv") or ($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic indel"))
+			for my $varName (keys %{ $vars->{$gene}{variants} })
 			{
-				$pos = $vars->{$gene}{variants}{$varName}{position};
-				$alt = $vars->{$gene}{variants}{$varName}{base_change};
-
-				if (exists $varList{"$pos\t$alt"})
+				if (($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic snv") or ($vars->{$gene}{variants}{$varName}{mutation_class} eq "somatic indel"))
 				{
-					for $pep (sort keys %{ $varList{"$pos\t$alt"} })
+					$pos = $vars->{$gene}{variants}{$varName}{position};
+					$alt = $vars->{$gene}{variants}{$varName}{base_change};
+	
+					if (exists $varList{"$pos\t$alt"})
 					{
-						for my $hla (sort keys %{ $varList{"$pos\t$alt"}{$pep} })
+						for $pep (sort keys %{ $varList{"$pos\t$alt"} })
 						{
-							$vars->{$gene}{variants}{$varName}{neoantigen} .= "$hla>$pep;";
+							for my $hla (sort keys %{ $varList{"$pos\t$alt"}{$pep} })
+							{
+								$vars->{$gene}{variants}{$varName}{neoantigen} .= "$hla>$pep;";
+							}
 						}
+						$vars->{$gene}{variants}{$varName}{neoantigen} =~ s/;$//;
 					}
-					$vars->{$gene}{variants}{$varName}{neoantigen} =~ s/;$//;
 				}
 			}
 		}
@@ -2607,11 +2647,16 @@ sub parseLIMS
 	my $idRef;
 	my $l;
 
-	my $limsDump = "/.mounts/labs/PCSI/raw_data/oicr/lims/lims_identity_dump_20170308.json";
+	my $limsDump = "/.mounts/labs/PCSI/raw_data/oicr/lims/lims_identity_dump_20170927.json";
+	my $prettyJson = "";
 
 	open (FILE, $limsDump) or die "Couldn't open $limsDump\n";
-	$l = <FILE>;
-	$idRef = decode_json($l);
+	while ($l = <FILE>)
+	{
+		chomp $l;
+		$prettyJson .= $l;
+	}
+	$idRef = decode_json($prettyJson);
 
 	for (my $i = 0; $i < scalar(@$idRef); $i++)
 	{
@@ -2627,7 +2672,6 @@ sub parseLIMS
 		}
 	}
 
-	my $prettyJson;
 
 	if ($externalID eq "NA")		# only check lims if the ID isn't in the dump
 	{
