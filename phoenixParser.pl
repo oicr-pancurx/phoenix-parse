@@ -2667,6 +2667,7 @@ sub parseLIMS
 				if ($idRef->[$i]{attributes}[$j]{name} eq "External Name")
 				{
 					$externalID = $idRef->[$i]{attributes}[$j]{value};
+					$externalID =~ s/,/ /g;
 				}
 			}
 		}
@@ -2689,6 +2690,7 @@ sub parseLIMS
 					if ($idRef->[$i]{attributes}[$j]{name} eq "External Name")
 					{
 						$externalID = $idRef->[$i]{attributes}[$j]{value};
+						$externalID =~ s/,/ /g;
 					}
 				}
 			}
