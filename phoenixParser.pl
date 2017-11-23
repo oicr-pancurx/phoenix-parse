@@ -2053,38 +2053,42 @@ sub parseCosmicSigNNLS
 	my @header;
 	my %row;
 
-	open (FILE, $file) or die "Couldn't open $file\n";
-	
-	$l = <FILE>;
-	@header = split(/ /, $l);
+	my %keep;
 
-	my $i = 0;
-	$l = <FILE>;
-	for my $f (split(/ /, $l))
+	if (-e $file)
 	{
-		$row{$header[$i]} = $f;
-		$i++;
+		open (FILE, $file) or die "Couldn't open $file\n";
+	
+		$l = <FILE>;
+		@header = split(/ /, $l);
+	
+		my $i = 0;
+		$l = <FILE>;
+		for my $f (split(/ /, $l))
+		{
+			$row{$header[$i]} = $f;
+			$i++;
+		}
+		close FILE;
+	
+	
+		my $prefix = "csnnls";
+		%keep = (
+			"Signature.1" => "${prefix}_sig1",
+			"Signature.2" => "${prefix}_sig2",
+			"Signature.3" => "${prefix}_sig3",
+			"Signature.5" => "${prefix}_sig5",
+			"Signature.6" => "${prefix}_sig6",
+			"Signature.8" => "${prefix}_sig8",
+			"Signature.13" => "${prefix}_sig13",
+			"Signature.17" => "${prefix}_sig17",
+			"Signature.18" => "${prefix}_sig18",
+			"Signature.20" => "${prefix}_sig20",
+			"Signature.26" => "${prefix}_sig26",
+			"Residuals" => "${prefix}_residuals",
+			"N.Mutations" => "${prefix}_n.mutations",
+		);
 	}
-	close FILE;
-
-
-	my $prefix = "csnnls";
-	my %keep = (
-		"Signature.1" => "${prefix}_sig1",
-		"Signature.2" => "${prefix}_sig2",
-		"Signature.3" => "${prefix}_sig3",
-		"Signature.5" => "${prefix}_sig5",
-		"Signature.6" => "${prefix}_sig6",
-		"Signature.8" => "${prefix}_sig8",
-		"Signature.13" => "${prefix}_sig13",
-		"Signature.17" => "${prefix}_sig17",
-		"Signature.18" => "${prefix}_sig18",
-		"Signature.20" => "${prefix}_sig20",
-		"Signature.26" => "${prefix}_sig26",
-		"Residuals" => "${prefix}_residuals",
-		"N.Mutations" => "${prefix}_n.mutations",
-	);
-
 
 	for my $f (@header)
 	{
@@ -2722,7 +2726,7 @@ sub doHallmarkScoring
 	$data->{dsbr_del4_load} = $data->{del_4_count};
 	$data->{dsbr_del4_ratio} = $data->{del_4_count} / $data->{del_count};
 	$data->{dsbr_delsv_load} = $data->{'DEL:100'} + $data->{'DEL:1k'} + $data->{'DEL:10k'};
-	if (exists $data{sv_count})
+	if ((exists $data{sv_count}) and ($data{sv_count} > 0))
 	{
 		$data->{dsbr_delsv_ratio} = ($data->{'DEL:100'} + $data->{'DEL:1k'} + $data->{'DEL:10k'}) / $data->{sv_count};
 	}
