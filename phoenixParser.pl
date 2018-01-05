@@ -28,6 +28,8 @@ unless (-e "$rootPath/$donor/$sample/$seqType/$aligner")
 	die "$rootPath/$donor/$sample/$seqType/$aligner not a valid path!\n";
 }
 
+my $hugoSynPath = "/.mounts/labs/PCSI/raw_data/hugo/HUGO_synonyms_171213.txt";
+
 my $ssmPath = "$rootPath/$donor/$sample/$seqType/$aligner/final_strelka-mutect/$sample.final.vcf";
 my $sgvPath = "$rootPath/$donor/$sample/$seqType/$aligner/final_gatk-germline/$sample.germline.final.vcf";
 my $svPath = "$rootPath/$donor/$sample/$seqType/$aligner/final_crest-delly/$sample.annotatedSV.tsv";
@@ -46,8 +48,11 @@ my $dsbrList = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/dsbr_list.tsv";
 my $mmrList = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/mmr_list.tsv";
 
 
+my %synonym;
+parseHugo($hugoSynPath, \%synonym, \%vars);
+
 my $refSeqFile = "/oicr/data/genomes/homo_sapiens_mc/refSeq/refSeq_genes.bed";
-my %genes = lookUpGenePositions($refSeqFile, \%vars);
+my %genes = lookUpGenePositions($refSeqFile, \%vars, \%synonym);
 
 my %tabix;
 my $file;
@@ -88,35 +93,24 @@ $data{donor} = $donor;
 $data{tumour} = $sample;
 $data{seq_type} = $seqType;
 
-parseCosmic($cosmicCensusFile, \%vars);
 
-parseSSM($ssmPath,\%data,\%vars,\%genes, \%tabix);
+parseCosmic($cosmicCensusFile, \%vars, \%synonym);
+
+parseSSM($ssmPath,\%data,\%vars,\%genes, \%tabix, \%synonym);
 parseRNAsigs($rnaSigFile, \%data);
 
-parseSGV($sgvPath,\%data,\%vars,\%genes, \%tabix);
+parseSGV($sgvPath,\%data,\%vars,\%genes, \%tabix, \%synonym);
 
-parseSV($svPath,\%data,\%vars,\%genes);
+parseSV($svPath,\%data,\%vars,\%genes, \%synonym);
 
 parseParams($paramPath,\%data);
 
-			if (exists $vars{ARID1A}{variants})
-			{
-				warn "ARID1A variants exist before segs\n";
-			}
 
-parseSegs($segPath,\%data,\%vars,\%genes);
+parseSegs($segPath,\%data,\%vars,\%genes, \%synonym);
 
-			if (exists $vars{ARID1A}{variants})
-			{
-				warn "ARID1A variants exist after segs\n";
-			}
 
 parseNeo($neoPaths,\%data,\%vars);
 
-			if (exists $vars{ARID1A}{variants})
-			{
-				warn "ARID1A variants exist after neo\n";
-			}
 
 if (($sample =~ /_X/) or ($sample =~ /Pa_O/))
 {
@@ -217,7 +211,7 @@ close FILE;
 open (FILE, ">$variantsFile") or die "Couldn't open $variantsFile\n";
 
 my @everyLine = qw/donor tumour normal external_id seq_type tumour_coverage normal_coverage cellularity ploidy/;
-@headers = qw/gene copy_number ab_counts mutation_class mutation_type position fusion_genes base_change tumour_freq tumour_depth normal_freq normal_depth nuc_context aa_context dbsnp cosmic neoantigen cadd_phred rarity 1000G_all ExAC_all ESP6500siv2_all clinvar gene_position maf_mean maf_p cosmic_census_flag cosmic_census_data/;
+@headers = qw/gene full_name gene_chr copy_number ab_counts mutation_class mutation_type position fusion_genes base_change tumour_freq tumour_depth normal_freq normal_depth nuc_context aa_context dbsnp cosmic neoantigen cadd_phred rarity 1000G_all ExAC_all ESP6500siv2_all clinvar gene_position maf_mean maf_p cosmic_census_flag cosmic_census_data synonyms entrez_id ensembl_id refseq_id pubmed_ids gene_fam_id gene_fam_name/;
 
 $outLine = "";
 for my $type (@everyLine)
@@ -306,6 +300,125 @@ for my $gene (sort comparePos keys %vars)
 close FILE;
 
 
+
+sub parseHugo
+{
+	my $file = shift;
+	my $synonym = shift;
+	my $vars = shift;
+
+	my $l;
+	my @header;
+	my @f;
+	my %row;
+
+	my $chr;
+
+	my $g;
+	my $tempg;
+
+	open (FILE, $file) or die "Couldn't open $file\n";
+	while ($l = <FILE>)
+	{
+		chomp $l;
+		if ($l =~ /^HGNC ID/)
+		{
+			@header = split(/\t/, $l);
+		}
+		else
+		{
+			%row = ();
+			@f = split(/\t/, $l);
+			for (my $i = 0; $i < scalar(@f); $i++)
+			{
+				$row{$header[$i]} = $f[$i];
+			}
+
+			unless ($row{Status} =~ /Withdrawn/)
+			{
+				$g = $row{"Approved Symbol"};
+
+				$vars->{$g}{gene} = $g;
+				
+				$vars->{$g}{full_name} = $row{"Approved Name"};
+				$vars->{$g}{full_name} =~ s/,/;/g;
+
+				$vars->{$g}{gene_chr} = $row{"Chromosome"};
+
+
+				$vars->{$g}{gene_chr_for_syn} = $chr;
+
+
+				$vars->{$g}{synonyms} = "$row{'Previous Symbols'}, $row{'Synonyms'}";
+				$vars->{$g}{synonyms} =~ s/, /;/g;
+				$vars->{$g}{synonyms} =~ s/^;//;
+				$vars->{$g}{synonyms} =~ s/;$//;
+
+				$vars->{$g}{entrez_id} = $row{"Entrez Gene ID"};
+				$vars->{$g}{ensembl_id} = $row{"Ensembl Gene ID"};
+				if (exists $row{"RefSeq IDs"})
+				{
+					$vars->{$g}{refseq_id} = $row{"RefSeq IDs"};
+				}
+
+				if (exists $row{"Pubmed IDs"})
+				{
+					$vars->{$g}{pubmed_ids} = $row{"Pubmed IDs"};
+					$vars->{$g}{pubmed_ids} =~ s/, /;/g;
+				}
+
+				if (exists $row{"Gene Family Name"})
+				{
+					$vars->{$g}{gene_fam_id} = $row{"Gene Family ID"};
+					$vars->{$g}{gene_fam_name} = $row{"Gene Family Name"};
+					$vars->{$g}{gene_fam_name} =~ s/, /;/g;
+				}
+
+				for my $c (split(/ and /, $row{"Chromosome"}))		# to handle "Xp22.33 and Yp11.32"
+				{
+					if ($c =~ /^(.*?)[pq]/)
+					{
+						$chr = "chr$1";
+					}
+					else
+					{
+						$chr = "chr" . $c;
+					}
+
+					for my $sym (split(/;/, $vars->{$g}{synonyms}))
+					{
+						if (exists $synonym->{$sym}{$chr})
+						{
+							$synonym->{$sym}{$chr} .= ";$g";
+						}
+						else
+						{
+							$synonym->{$sym}{$chr} = $g;
+						}
+					}
+				}
+
+			}
+
+
+
+		}
+	}
+	close FILE;
+
+	for $g (keys %{ $vars })
+	{
+		$synonym->{$g}{$vars->{$g}{gene_chr_for_syn}} = $g;
+	}
+}
+
+
+
+
+
+
+
+
 sub parseSSM
 {
 	my $file = shift;
@@ -313,6 +426,7 @@ sub parseSSM
 	my $vars = shift;
 	my $genes = shift;
 	my $tabix = shift;
+	my $synonym = shift;
 
 	my $l;
 	my ($donor,$tumour,$normal,$tCov,$nCov,$gene,$consequence,$change);
@@ -606,6 +720,7 @@ sub parseSSM
 						$gene = $1;
 					}
 #					ANNOVAR=splicing,FRMD5(NM_032892:exon6:c.427+1G>A)
+#					ANNOVAR=splicing,IFI27:IFI27(NM_001130080:exon4:c.122-1->GGCCATGGC);
 					if ($info =~ /ANNOVAR=splicing,(.*?)\((.*?)\);/)
 					{
 						$gene = $1;
@@ -700,8 +815,11 @@ sub parseSSM
 						$mutType = "unknown";		# shrug...
 					}
 
+
+
 					unless ($mutType eq "")
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SSM)", "warn");
 						%anno = ();
 						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{ssm_annovar},\%anno);
 						#print Dumper(%anno);
@@ -742,6 +860,7 @@ sub parseSSM
 						}
 
 						$varName = "SSM $mutType $chrPos $baseChange";
+						$vars->{$gene}{gene} = $gene;
 						$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
 						$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
 						$vars->{$gene}{variants}{$varName}{position} = $chrPos;
@@ -789,7 +908,7 @@ sub parseSSM
 						}
 					}
 
-					if (($mutType ne "") and ($gene ne "chmm/segway") and ($gene ne "drm") and (exists $genes->{$gene}))
+					if (($mutType ne "") and ($gene ne "chmm/segway") and ($gene ne "drm") and (exists $vars->{$gene}))
 					{
 						%anno = ();
 						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{ssm_annovar},\%anno);
@@ -906,6 +1025,7 @@ sub parseSGV
 	my $vars = shift;
 	my $genes = shift;
 	my $tabix = shift;
+	my $synonym = shift;
 
 	$data->{sgv_file} = $file;
 
@@ -1135,6 +1255,7 @@ sub parseSGV
 
 					unless ($mutType eq "")
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SGV)", "warn");
 						# extended annovar
 						%anno = ();
 						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{sgv_annovar},\%anno);
@@ -1181,6 +1302,7 @@ sub parseSGV
 						$baseChange = "$ref>$alt";
 
 						$varName = "SGV $mutType $chrPos $baseChange";
+						$vars->{$gene}{gene} = $gene;
 						$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
 						$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
 						$vars->{$gene}{variants}{$varName}{position} = $chrPos;
@@ -1229,7 +1351,7 @@ sub parseSGV
 						}
 					}
 
-					if (($mutType ne "") and ($gene ne "chmm/segway") and ($gene ne "drm") and (exists $genes->{$gene}))
+					if (($mutType ne "") and ($gene ne "chmm/segway") and ($gene ne "drm") and (exists $vars->{$gene}))
 					{
 						%anno = ();
 						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{sgv_annovar},\%anno);
@@ -1330,6 +1452,7 @@ sub parseSV
 	my $data = shift;
 	my $vars = shift;
 	my $genes = shift;
+	my $synonym = shift;
 
 	my ($l,@f,$gene,$chr1,$pos1,$chr2,$pos2,$type,$split1,$near1,$split2,$near2,$varName,$uniq1,$uniq2);
 	my (%reported,%hash);
@@ -1529,6 +1652,8 @@ sub parseSV
 				{
 					unless ($gene eq ".")
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr1, "RefSeq (SV)", "warn");
+
 						$vars->{$gene}{variants}{$varName}{mutation_class} = "somatic sv";
 						$vars->{$gene}{variants}{$varName}{mutation_type} = "$prettyType{$type} breakpoint";
 						$vars->{$gene}{variants}{$varName}{position} = "$chr1:$pos1-$chr2:$pos2";
@@ -1568,6 +1693,8 @@ sub parseSV
 				{
 					unless ($gene eq ".")
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr2, "RefSeq (SV)", "warn");
+
 						$vars->{$gene}{variants}{$varName}{mutation_class} = "somatic sv";
 						$vars->{$gene}{variants}{$varName}{mutation_type} = "$prettyType{$type} breakpoint";
 						$vars->{$gene}{variants}{$varName}{position} = "$chr1:$pos1-$chr2:$pos2";
@@ -1609,6 +1736,8 @@ sub parseSV
 				{
 					for $gene (split(/\|/, $near1))
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr1, "RefSeq (SV)", "warn");
+
 						$vars->{$gene}{variants}{$varName}{mutation_class} = "somatic sv";
 						$vars->{$gene}{variants}{$varName}{mutation_type} = "$prettyType{$type} potential fusion";
 						$vars->{$gene}{variants}{$varName}{position} = "$chr1:$pos1-$chr2:$pos2";
@@ -1626,6 +1755,8 @@ sub parseSV
 					}
 					for $gene (split(/\|/, $near2))
 					{
+						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr2, "RefSeq (SV)", "warn");
+						
 						$vars->{$gene}{variants}{$varName}{mutation_class} = "somatic sv";
 						$vars->{$gene}{variants}{$varName}{mutation_type} = "$prettyType{$type} potential fusion";
 						$vars->{$gene}{variants}{$varName}{position} = "$chr1:$pos1-$chr2:$pos2";
@@ -1718,6 +1849,7 @@ sub parseSegs
 	my $data = shift;
 	my $vars = shift;
 	my $genes = shift;
+	my $synonym = shift;
 
 	my $ploidyFoldAmp = ($data->{ploidy} * 4) - 0.5;
 	my $multiSeg;
@@ -1745,6 +1877,7 @@ sub parseSegs
 			$homdel = 0;
 			$position = "";
 	
+			$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "RefSeq (SEG)", "no warn");
 	
 			$iter = $tabix->query($chr,$start,$end);
 			if (defined $iter->{"_"})
@@ -2016,6 +2149,7 @@ sub lookUpGenePositions
 {
 	my $file = shift;
 	my $vars = shift;
+	my $synonym = shift;
 	my %genePos;
 
 	open (FILE, $file) or die "Couldn't open $file\n";
@@ -2032,12 +2166,68 @@ sub lookUpGenePositions
 			$gene = $1;
 		}
 
+		$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "RefSeq", "no warn");
+
 		$genePos{$gene} = "$chr:$start-$end";
 		$vars->{$gene}{gene} = $gene;
 		$vars->{$gene}{gene_position} = "$chr:$start-$end";
 	}
 
 	return %genePos;
+}
+
+
+sub findBestGeneSymbol
+{
+	my $g = shift;
+	my $vars = shift;
+	my $synonym = shift;
+	my $chr = shift;
+	my $origin = shift;
+	my $doWarn = shift;
+	my $synChr;
+
+	my $lastSynChr;
+
+	if (exists $vars->{$g})
+	{
+		return $g;
+	}
+	elsif (exists $synonym->{$g})
+	{
+		for $synChr (keys %{ $synonym->{$g} })
+		{
+			$lastSynChr = $synChr;
+			if ($synChr eq $chr)
+			{
+				unless ($synonym->{$g}{$synChr} =~ /;/)
+				{
+					return $synonym->{$g}{$synChr};
+				}
+				else
+				{
+					if ($doWarn eq "warn")
+					{
+						warn " $origin: multiple same chr synonyms for $g on $chr: $synonym->{$g}{$synChr}\n";
+					}
+					return $synonym->{$g}{$synChr};
+				}
+			}
+		}
+		if ($doWarn eq "warn")
+		{
+			warn " $origin: no synonyms for $g on $chr, using original name\n";
+		}
+		return $g;
+	}
+	else
+	{
+		if ($doWarn eq "warn")
+		{
+			warn " $origin: no match or synonym entry for $g, using original name\n";
+		}
+		return $g;
+	}
 }
 
 
@@ -2537,8 +2727,9 @@ sub parseCosmic
 {
 	my $file = shift;
 	my $vars = shift;
+	my $synonym = shift;
 
-	my ($l,$foundGene);
+	my ($l,$foundGene, $chr);
 	my (@f, @header);
 	my (%row, %synonyms);
 
@@ -2586,8 +2777,14 @@ sub parseCosmic
 				}
 			}
 
+			$chr = $row{'Genome Location'};
+			$chr =~ s/:.*//;
+			$chr = "chr$chr";
+
 			for my $name (keys %synonyms)
 			{
+				$name = findBestGeneSymbol($name, $vars, $synonym, $chr, "COSMIC Census", "no warn");
+				
 				if (exists $vars->{$name})
 				{
 					$foundGene = 1;
@@ -2626,11 +2823,11 @@ sub parseCosmic
 			{
 				if (exists $row{Synonyms})
 				{
-					warn "Couldn't find refseq gene for Cosmic census gene with the following names: $row{'Gene Symbol'},$row{Synonyms}\n";
+					warn "Couldn't find HUGO gene for Cosmic census gene with the following names: $row{'Gene Symbol'},$row{Synonyms}\n";
 				}
 				else
 				{
-					warn "Couldn't find refseq gene for Cosmic census gene with the following names: $row{'Gene Symbol'}\n";
+					warn "Couldn't find HUGO gene for Cosmic census gene with the following names: $row{'Gene Symbol'}\n";
 				}
 			}
 
