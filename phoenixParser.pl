@@ -371,7 +371,8 @@ sub parseHugo
 				{
 					$vars->{$g}{gene_fam_id} = $row{"Gene Family ID"};
 					$vars->{$g}{gene_fam_name} = $row{"Gene Family Name"};
-					$vars->{$g}{gene_fam_name} =~ s/, /;/g;
+					$vars->{$g}{gene_fam_name} =~ s/, /; /g;
+					$vars->{$g}{gene_fam_name} =~ s/,/;/g;
 				}
 
 				for my $c (split(/ and /, $row{"Chromosome"}))		# to handle "Xp22.33 and Yp11.32"
