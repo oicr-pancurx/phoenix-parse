@@ -40,7 +40,7 @@ my $xenomePaths = "$rootPath/$donor/$sample/$seqType/xenome/1.0.1-r/*.log";
 my $cosmicSignnlsPath = "$rootPath/$donor/$sample/$seqType/$aligner/cosmicSigNNLS/${sample}_signatures.txt";
 
 my $alexandrovFile = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/alexandrov_signature.tsv";
-my $rnaSigFile = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/rna_from_moffitt_201707.tsv";
+my $rnaSigFile = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/RNA-subtype.txt";
 #my $rnaSigFile = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/rna_signature.tsv";
 my $cosmicCensusFile = "/.mounts/labs/PCSI/users/rdenroche/phoenixParser/cosmic_census_20161115.tsv";
 
@@ -344,13 +344,14 @@ sub parseHugo
 				$vars->{$g}{full_name} =~ s/,/;/g;
 
 				$vars->{$g}{gene_chr} = $row{"Chromosome"};
+				$vars->{$g}{gene_chr} =~ s/,/;/g;
 
 
 				$vars->{$g}{gene_chr_for_syn} = $chr;
 
 
 				$vars->{$g}{synonyms} = "$row{'Previous Symbols'}, $row{'Synonyms'}";
-				$vars->{$g}{synonyms} =~ s/, /;/g;
+				$vars->{$g}{synonyms} =~ s/,/;/g;
 				$vars->{$g}{synonyms} =~ s/^;//;
 				$vars->{$g}{synonyms} =~ s/;$//;
 
@@ -359,19 +360,19 @@ sub parseHugo
 				if (exists $row{"RefSeq IDs"})
 				{
 					$vars->{$g}{refseq_id} = $row{"RefSeq IDs"};
+					$vars->{$g}{refseq_id} =~ s/,/;/g;
 				}
 
 				if (exists $row{"Pubmed IDs"})
 				{
 					$vars->{$g}{pubmed_ids} = $row{"Pubmed IDs"};
-					$vars->{$g}{pubmed_ids} =~ s/, /;/g;
+					$vars->{$g}{pubmed_ids} =~ s/,/;/g;
 				}
 
 				if (exists $row{"Gene Family Name"})
 				{
 					$vars->{$g}{gene_fam_id} = $row{"Gene Family ID"};
 					$vars->{$g}{gene_fam_name} = $row{"Gene Family Name"};
-					$vars->{$g}{gene_fam_name} =~ s/, /; /g;
 					$vars->{$g}{gene_fam_name} =~ s/,/;/g;
 				}
 
@@ -516,6 +517,8 @@ sub parseSSM
 
 	my $isDeletion;
 	my $isInsertion;
+
+	my %infoHash;
 
 	if (-e $file)
 	{
@@ -710,179 +713,153 @@ sub parseSSM
 						}
 					}
 	
+
 					$info = "$info;";
+					%infoHash = ();
+					%infoHash = parseANNOVAR($info);
+
 					if ($info =~ /COSMIC=(.*?);/)
 					{
 						$COSMIC = $1;
 					}
 
-					if ($info =~ /ANNOVAR=exonic,(.*?);/)
+					for my $t (sort keys %infoHash)
 					{
-						$gene = $1;
-					}
-#					ANNOVAR=splicing,FRMD5(NM_032892:exon6:c.427+1G>A)
-#					ANNOVAR=splicing,IFI27:IFI27(NM_001130080:exon4:c.122-1->GGCCATGGC);
-					if ($info =~ /ANNOVAR=splicing,(.*?)\((.*?)\);/)
-					{
-						$gene = $1;
-						$consequence = $2;
-						$spliceCount++;
-						$deleteriousCount++;
-
-						$mutType = "splicing";
-						
-						$nucContext = "";
-
-						for my $isoform (split (/,/, $2))
+						for my $g (sort keys %{ $infoHash{$t} })
 						{
-							if ($isoform =~ /^(.*?):.*?:(.*?)$/)
+							$gene = $g;
+							$consequence = $infoHash{$t}{$g}{consequence};
+							$nucContext = $infoHash{$t}{$g}{nuc};
+							$aaContext = $infoHash{$t}{$g}{aa};
+
+							if ($consequence eq "splicing")
 							{
-								$nucContext .= "|$1:$2";
+								$mutType = "splicing";
+								$spliceCount++;
 							}
-						}
-						$nucContext =~ s/^\|//;
-						$aaContext = "NA";
-					}
-					if ($info =~ /ANNOVAR_EXONIC=(.*?);/)
-					{
-						$consequence = $1;
-
-						$nucContext = "";
-						$aaContext = "";
-						# nonsynonymous-SNV,KCNH7:NM_033272:exon2:c.T85A:p.F29I,KCNH7:NM_173162:exon2:c.T85A:p.F29I,;
-						for my $isoform (split (/,/, $consequence))
-						{
-							if ($isoform =~ /^$gene:(.*?):.*?:(.*?):(.*?)$/)		# not handling multiple genes!
+							elsif (($consequence =~ /^nonframeshift/) or ($consequence =~ /^nonsynonymous/) or ($consequence =~ /^stoploss/))
 							{
-								$nucContext .= "|$1:$2";
-								$aaContext .= "|$1:$3";
-							}
-						}
-						$nucContext =~ s/^\|//;
-						$aaContext =~ s/^\|//;
-					}
-	
-					if (($consequence =~ /^nonframeshift/) or ($consequence =~ /^nonsynonymous/) or ($consequence =~ /^stoploss/))
-					{
-						$deleteriousCount++;
-						if ($consequence =~ /^nonframeshift/)
-						{
-							$nonframeshiftCount++;
-							$mutType = "nonframeshift";
-							if ($isDeletion == 1)
-							{
-								$delNonframeshiftCount++;
-							}
-							else
-							{
-								$insNonframeshiftCount++;
-							}
-						}
-						elsif ($consequence =~ /^nonsynonymous/)
-						{
-							$nonsynCount++;
-							$mutType = "nonsynonymous";
-						}
-						elsif ($consequence =~ /^stoploss/)
-						{
-							$stoplossCount++;
-							$mutType = "stoploss";
-						}
-					}
-					elsif (($consequence =~ /^stopgain/) or ($consequence =~ /^frameshift/))
-					{
-						$deleteriousCount++;
-						if ($consequence =~ /^stopgain/)
-						{
-							$stopgainCount++;
-							$mutType = "stopgain";
-						}
-						elsif ($consequence =~ /^frameshift/)
-						{
-							$frameshiftCount++;
-							$mutType = "frameshift";
-							if ($isDeletion == 1)
-							{
-								$delFrameshiftCount++;
-							}
-							else
-							{
-								$insFrameshiftCount++;
-							}
-						}
-					}
-					elsif ($consequence =~ /^unknown/)
-					{
-						$mutType = "unknown";		# shrug...
-					}
-
-
-
-					unless ($mutType eq "")
-					{
-						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SSM)", "warn");
-						%anno = ();
-						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{ssm_annovar},\%anno);
-						#print Dumper(%anno);
-
-						$popFreq = -1;
-						$valuesExist = 0;
-						for my $value (qw/1000G_ALL ExAC_ALL ESP6500siv2_ALL/)
-						{
-							if (exists $anno{$value})
-							{
-								$valuesExist = 1;
-								unless ($anno{$value} eq "NA")
+								$deleteriousCount++;
+								if ($consequence =~ /^nonframeshift/)
 								{
-									if ($anno{$value} > $popFreq)
+									$nonframeshiftCount++;
+									$mutType = "nonframeshift";
+									if ($isDeletion == 1)
 									{
-										$popFreq = $anno{$value};
+										$delNonframeshiftCount++;
+									}
+									else
+									{
+										$insNonframeshiftCount++;
+									}
+								}
+								elsif ($consequence =~ /^nonsynonymous/)
+								{
+									$nonsynCount++;
+									$mutType = "nonsynonymous";
+								}
+								elsif ($consequence =~ /^stoploss/)
+								{
+									$stoplossCount++;
+									$mutType = "stoploss";
+								}
+							}
+							elsif (($consequence =~ /^stopgain/) or ($consequence =~ /^frameshift/))
+							{
+								$deleteriousCount++;
+								if ($consequence =~ /^stopgain/)
+								{
+									$stopgainCount++;
+									$mutType = "stopgain";
+								}
+								elsif ($consequence =~ /^frameshift/)
+								{
+									$frameshiftCount++;
+									$mutType = "frameshift";
+									if ($isDeletion == 1)
+									{
+										$delFrameshiftCount++;
+									}
+									else
+									{
+										$insFrameshiftCount++;
 									}
 								}
 							}
+							elsif ($consequence =~ /^unknown/)
+							{
+								$mutType = "unknown";		# shrug...
+							}
+		
+		
+		
+							unless ($mutType eq "")
+							{
+								$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SSM)", "warn");
+								%anno = ();
+								doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{ssm_annovar},\%anno);
+								#print Dumper(%anno);
+		
+								$popFreq = -1;
+								$valuesExist = 0;
+								for my $value (qw/1000G_ALL ExAC_ALL ESP6500siv2_ALL/)
+								{
+									if (exists $anno{$value})
+									{
+										$valuesExist = 1;
+										unless ($anno{$value} eq "NA")
+										{
+											if ($anno{$value} > $popFreq)
+											{
+												$popFreq = $anno{$value};
+											}
+										}
+									}
+								}
+								$cosmicFlag = "NA";
+								if (exists $vars->{$gene}{cosmic_census_types}{$mutType})
+								{
+									$cosmicFlag = "cosmic_mutation";
+								}
+								
+								if ($popFreq > 0.01)
+								{
+									$rarity = "common";
+								}
+								elsif ($popFreq > 0)
+								{
+									$rarity = "rare"
+								}
+								elsif ($valuesExist == 1)
+								{
+									$rarity = "novel";
+								}
+		
+								$varName = "SSM $mutType $chrPos $baseChange";
+								$vars->{$gene}{gene} = $gene;
+								$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
+								$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
+								$vars->{$gene}{variants}{$varName}{position} = $chrPos;
+								$vars->{$gene}{variants}{$varName}{base_change} = $baseChange;
+		
+								$vars->{$gene}{variants}{$varName}{tumour_freq} = sprintf("%.3f",$tFreq);
+								$vars->{$gene}{variants}{$varName}{tumour_depth} = $tDepth;
+								$vars->{$gene}{variants}{$varName}{normal_freq} = sprintf("%.3f",$nFreq);
+								$vars->{$gene}{variants}{$varName}{normal_depth} = $nDepth;
+		
+								$vars->{$gene}{variants}{$varName}{nuc_context} = $nucContext;
+								$vars->{$gene}{variants}{$varName}{aa_context} = $aaContext;
+								$vars->{$gene}{variants}{$varName}{dbsnp} = $id;
+								$vars->{$gene}{variants}{$varName}{cosmic} = $COSMIC;
+								$vars->{$gene}{variants}{$varName}{rarity} = $rarity;
+								$vars->{$gene}{variants}{$varName}{"1000G_all"} = $anno{'1000G_ALL'};
+								$vars->{$gene}{variants}{$varName}{ExAC_all} = $anno{ExAC_ALL};
+								$vars->{$gene}{variants}{$varName}{ESP6500siv2_all} = $anno{ESP6500siv2_ALL};
+								$vars->{$gene}{variants}{$varName}{cadd_phred} = $anno{CADD_phred};
+								$vars->{$gene}{variants}{$varName}{clinvar} = $anno{clinvar_20150330};
+								$vars->{$gene}{variants}{$varName}{cosmic_census_flag} = $cosmicFlag;
+							}
 						}
-						$cosmicFlag = "NA";
-						if (exists $vars->{$gene}{cosmic_census_types}{$mutType})
-						{
-							$cosmicFlag = "cosmic_mutation";
-						}
-						
-						if ($popFreq > 0.01)
-						{
-							$rarity = "common";
-						}
-						elsif ($popFreq > 0)
-						{
-							$rarity = "rare"
-						}
-						elsif ($valuesExist == 1)
-						{
-							$rarity = "novel";
-						}
-
-						$varName = "SSM $mutType $chrPos $baseChange";
-						$vars->{$gene}{gene} = $gene;
-						$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
-						$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
-						$vars->{$gene}{variants}{$varName}{position} = $chrPos;
-						$vars->{$gene}{variants}{$varName}{base_change} = $baseChange;
-
-						$vars->{$gene}{variants}{$varName}{tumour_freq} = sprintf("%.3f",$tFreq);
-						$vars->{$gene}{variants}{$varName}{tumour_depth} = $tDepth;
-						$vars->{$gene}{variants}{$varName}{normal_freq} = sprintf("%.3f",$nFreq);
-						$vars->{$gene}{variants}{$varName}{normal_depth} = $nDepth;
-
-						$vars->{$gene}{variants}{$varName}{nuc_context} = $nucContext;
-						$vars->{$gene}{variants}{$varName}{aa_context} = $aaContext;
-						$vars->{$gene}{variants}{$varName}{dbsnp} = $id;
-						$vars->{$gene}{variants}{$varName}{cosmic} = $COSMIC;
-						$vars->{$gene}{variants}{$varName}{rarity} = $rarity;
-						$vars->{$gene}{variants}{$varName}{"1000G_all"} = $anno{'1000G_ALL'};
-						$vars->{$gene}{variants}{$varName}{ExAC_all} = $anno{ExAC_ALL};
-						$vars->{$gene}{variants}{$varName}{ESP6500siv2_all} = $anno{ESP6500siv2_ALL};
-						$vars->{$gene}{variants}{$varName}{cadd_phred} = $anno{CADD_phred};
-						$vars->{$gene}{variants}{$varName}{clinvar} = $anno{clinvar_20150330};
-						$vars->{$gene}{variants}{$varName}{cosmic_census_flag} = $cosmicFlag;
 					}
 	
 					$mutType = "";
@@ -1042,6 +1019,9 @@ sub parseSGV
 	my $missenseCount = 0;
 	my $nonsenseCount = 0;
 	my $noncodingCount = 0;
+	my $spliceCount = 0;
+
+	my %infoHash;
 
 	my $cosmicFlag;
 
@@ -1171,161 +1151,135 @@ sub parseSGV
 
 
 					$info = "$info;";
+					%infoHash = parseANNOVAR($info);
 
 					if ($info =~ /COSMIC=(.*?);/)
 					{
 						$COSMIC = $1;
 					}
 
-					if ($info =~ /ANNOVAR=exonic,(.*?);/)
+					for my $t (sort keys %infoHash)
 					{
-						$gene = $1;
-					}
-					if ($info =~ /ANNOVAR=splicing,(.*?)\((.*?)\);/)
-					{
-						$gene = $1;
-						$consequence = $2;
-						$missenseCount++;
-
-						$mutType = "splicing";
-						
-						$nucContext = "";
-
-						for my $isoform (split (/,/, $2))
+						for my $g (sort keys %{ $infoHash{$t} })
 						{
-							if ($isoform =~ /^(.*?):.*?:(.*?)$/)
+							$gene = $g;
+							$consequence = $infoHash{$t}{$g}{consequence};
+							$nucContext = $infoHash{$t}{$g}{nuc};
+							$aaContext = $infoHash{$t}{$g}{aa};
+
+							if ($consequence eq "splicing")
 							{
-								$nucContext .= "|$1:$2";
+								$mutType = "splicing";
+								$spliceCount++;
 							}
-						}
-						$nucContext =~ s/^\|//;
-						$aaContext = "NA";
-					}
-					if ($info =~ /ANNOVAR_EXONIC=(.*);/)
-					{
-						$consequence = $1;
-
-						$nucContext = "";
-						$aaContext = "";
-						# nonsynonymous-SNV,KCNH7:NM_033272:exon2:c.T85A:p.F29I,KCNH7:NM_173162:exon2:c.T85A:p.F29I,;
-						for my $isoform (split (/,/, $consequence))
-						{
-							if ($isoform =~ /^$gene:(.*?):.*?:(.*?):(.*?)$/)		# not handling multiple genes!
+							elsif (($consequence =~ /^nonframeshift/) or ($consequence =~ /^nonsynonymous/) or ($consequence =~ /^stoploss/))
 							{
-								$nucContext .= "|$1:$2";
-								$aaContext .= "|$1:$3";
-							}
-						}
-						$nucContext =~ s/^\|//;
-						$aaContext =~ s/^\|//;
-					}
-	
-					if (($consequence =~ /^nonframeshift/) or ($consequence =~ /^nonsynonymous/) or ($consequence =~ /^stoploss/))
-					{
-						$missenseCount++;
-
-						if ($consequence =~ /^nonframeshift/)
-						{
-							$mutType = "nonframeshift";
-						}
-						elsif ($consequence =~ /^nonsynonymous/)
-						{
-							$mutType = "nonsynonymous";
-						}
-						elsif ($consequence =~ /^stoploss/)
-						{
-							$mutType = "stoploss";
-						}
-					}
-					elsif (($consequence =~ /^stopgain/) or ($consequence =~ /^frameshift/))
-					{
-						$nonsenseCount++;
-						if ($consequence =~ /^stopgain/)
-						{
-							$mutType = "stopgain";
-						}
-						elsif ($consequence =~ /^frameshift/)
-						{
-							$mutType = "frameshift";
-						}
-					}
-					elsif ($consequence =~ /^splicing/)
-					{
-						$mutType = "splicing";
-					}
-
-					unless ($mutType eq "")
-					{
-						$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SGV)", "warn");
-						# extended annovar
-						%anno = ();
-						doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{sgv_annovar},\%anno);
-	
-						$popFreq = -1;
-						$valuesExist = 0;
-						for my $value (qw/1000G_ALL ExAC_ALL ESP6500siv2_ALL/)
-						{
-							if (exists $anno{$value})
-							{
-								$valuesExist = 1;
-								unless ($anno{$value} eq "NA")
+								$missenseCount++;
+		
+								if ($consequence =~ /^nonframeshift/)
 								{
-									if ($anno{$value} > $popFreq)
-									{
-										$popFreq = $anno{$value};
-									}
+									$mutType = "nonframeshift";
+								}
+								elsif ($consequence =~ /^nonsynonymous/)
+								{
+									$mutType = "nonsynonymous";
+								}
+								elsif ($consequence =~ /^stoploss/)
+								{
+									$mutType = "stoploss";
 								}
 							}
+							elsif (($consequence =~ /^stopgain/) or ($consequence =~ /^frameshift/))
+							{
+								$nonsenseCount++;
+								if ($consequence =~ /^stopgain/)
+								{
+									$mutType = "stopgain";
+								}
+								elsif ($consequence =~ /^frameshift/)
+								{
+									$mutType = "frameshift";
+								}
+							}
+							elsif ($consequence =~ /^splicing/)
+							{
+								$mutType = "splicing";
+							}
+		
+							unless ($mutType eq "")
+							{
+								$gene = findBestGeneSymbol($gene, $vars, $synonym, $chr, "ANNOVAR (SGV)", "warn");
+								# extended annovar
+								%anno = ();
+								doANNOVARlookup($chr,$pos,$ref,$alt,$tabix->{sgv_annovar},\%anno);
+			
+								$popFreq = -1;
+								$valuesExist = 0;
+								for my $value (qw/1000G_ALL ExAC_ALL ESP6500siv2_ALL/)
+								{
+									if (exists $anno{$value})
+									{
+										$valuesExist = 1;
+										unless ($anno{$value} eq "NA")
+										{
+											if ($anno{$value} > $popFreq)
+											{
+												$popFreq = $anno{$value};
+											}
+										}
+									}
+								}
+								
+								if ($popFreq > 0.01)
+								{
+									#	$commonCount++;
+									$rarity = "common";
+								}
+								elsif ($popFreq > 0)
+								{
+									#	$rareCount++;
+									$rarity = "rare";
+								}
+								elsif ($valuesExist == 1)
+								{
+									#	$novelCount++;
+									$rarity = "novel";
+								}
+		
+								$cosmicFlag = "NA";
+								if (exists $vars->{$gene}{cosmic_census_types}{$mutType})
+								{
+									$cosmicFlag = "cosmic_mutation";
+								}
+		
+								$baseChange = "$ref>$alt";
+		
+								$varName = "SGV $mutType $chrPos $baseChange";
+								$vars->{$gene}{gene} = $gene;
+								$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
+								$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
+								$vars->{$gene}{variants}{$varName}{position} = $chrPos;
+								$vars->{$gene}{variants}{$varName}{base_change} = $baseChange;
+		
+								$vars->{$gene}{variants}{$varName}{tumour_freq} = sprintf("%.3f",$tFreq);
+								$vars->{$gene}{variants}{$varName}{tumour_depth} = $tDepth;
+								$vars->{$gene}{variants}{$varName}{normal_freq} = sprintf("%.3f",$nFreq);
+								$vars->{$gene}{variants}{$varName}{normal_depth} = $nDepth;
+		
+								$vars->{$gene}{variants}{$varName}{nuc_context} = $nucContext;
+								$vars->{$gene}{variants}{$varName}{aa_context} = $aaContext;
+								$vars->{$gene}{variants}{$varName}{dbsnp} = $id;
+								$vars->{$gene}{variants}{$varName}{cosmic} = $COSMIC;
+								$vars->{$gene}{variants}{$varName}{rarity} = $rarity;
+								$vars->{$gene}{variants}{$varName}{"1000G_all"} = $anno{'1000G_ALL'};
+								$vars->{$gene}{variants}{$varName}{ExAC_all} = $anno{ExAC_ALL};
+								$vars->{$gene}{variants}{$varName}{ESP6500siv2_all} = $anno{ESP6500siv2_ALL};
+								$vars->{$gene}{variants}{$varName}{cadd_phred} = $anno{CADD_phred};
+								$vars->{$gene}{variants}{$varName}{clinvar} = $anno{clinvar_20150330};
+								$vars->{$gene}{variants}{$varName}{cosmic_census_flag} = $cosmicFlag;
+							
+							}
 						}
-						
-						if ($popFreq > 0.01)
-						{
-							#	$commonCount++;
-							$rarity = "common";
-						}
-						elsif ($popFreq > 0)
-						{
-							#	$rareCount++;
-							$rarity = "rare";
-						}
-						elsif ($valuesExist == 1)
-						{
-							#	$novelCount++;
-							$rarity = "novel";
-						}
-
-						$cosmicFlag = "NA";
-						if (exists $vars->{$gene}{cosmic_census_types}{$mutType})
-						{
-							$cosmicFlag = "cosmic_mutation";
-						}
-
-						$baseChange = "$ref>$alt";
-
-						$varName = "SGV $mutType $chrPos $baseChange";
-						$vars->{$gene}{gene} = $gene;
-						$vars->{$gene}{variants}{$varName}{mutation_class} = $mutClass;
-						$vars->{$gene}{variants}{$varName}{mutation_type} = $mutType;
-						$vars->{$gene}{variants}{$varName}{position} = $chrPos;
-						$vars->{$gene}{variants}{$varName}{base_change} = $baseChange;
-
-						$vars->{$gene}{variants}{$varName}{tumour_freq} = sprintf("%.3f",$tFreq);
-						$vars->{$gene}{variants}{$varName}{tumour_depth} = $tDepth;
-						$vars->{$gene}{variants}{$varName}{normal_freq} = sprintf("%.3f",$nFreq);
-						$vars->{$gene}{variants}{$varName}{normal_depth} = $nDepth;
-
-						$vars->{$gene}{variants}{$varName}{nuc_context} = $nucContext;
-						$vars->{$gene}{variants}{$varName}{aa_context} = $aaContext;
-						$vars->{$gene}{variants}{$varName}{dbsnp} = $id;
-						$vars->{$gene}{variants}{$varName}{cosmic} = $COSMIC;
-						$vars->{$gene}{variants}{$varName}{rarity} = $rarity;
-						$vars->{$gene}{variants}{$varName}{"1000G_all"} = $anno{'1000G_ALL'};
-						$vars->{$gene}{variants}{$varName}{ExAC_all} = $anno{ExAC_ALL};
-						$vars->{$gene}{variants}{$varName}{ESP6500siv2_all} = $anno{ESP6500siv2_ALL};
-						$vars->{$gene}{variants}{$varName}{cadd_phred} = $anno{CADD_phred};
-						$vars->{$gene}{variants}{$varName}{clinvar} = $anno{clinvar_20150330};
-						$vars->{$gene}{variants}{$varName}{cosmic_census_flag} = $cosmicFlag;
-					
 					}
 	
 					$mutType = "";
@@ -3234,3 +3188,112 @@ sub freeMemChunks
     return;
 }
 
+
+
+
+sub parseANNOVAR
+{
+	my $info = shift;
+	$info = "$info;";
+
+	my %infoHash;
+	my $gene = ".";
+	my $consequence = ".";
+	my $mutType;
+	my ($t, $g, $nucContext, $aaContext);
+	my (@types, @genes);
+	my %annoHash;
+
+	if ($info =~ /ANNOVAR=(.*?);ANNOVAR_G=(.*?);/)
+	{
+		@types = split(/\|/, $1);
+		@genes = split(/\|/, $2);
+
+		for (my $i = 0; $i < scalar @types; $i++)
+		{
+			$t = $types[$i];
+			if ($t eq "exonic")
+			{
+				for $g (split(/,/, $genes[$i]))
+				{
+					$annoHash{$t}{$g}++;
+				}
+			}
+			elsif ($t eq "splicing")
+			{
+				while ($genes[$i] =~ /^(.*?)\((.*?)\)/)
+				{
+					$annoHash{$t}{$1} = $2;
+					$genes[$i] =~ s/^.*?\(.*?\)//;
+					$genes[$i] =~ s/^,//;
+				}
+			}
+		}
+
+
+		for $t (sort keys %annoHash)
+		{
+			if ($t eq "splicing")
+			{
+				for $g (sort keys %{ $annoHash{$t} })
+				{
+					$nucContext = "";
+					for my $isoform (split (/,/, $annoHash{$t}{$g}))
+					{
+						if ($isoform =~ /^(.*?):.*?:(.*?)$/)
+						{
+							$nucContext .= "|$1:$2";
+						}
+					}
+					$nucContext =~ s/^\|//;
+					$aaContext = "NA";
+
+					$infoHash{$t}{$g}{consequence} = "splicing";
+					$infoHash{$t}{$g}{nuc} = $nucContext;
+					$infoHash{$t}{$g}{aa} = $aaContext;
+				}
+			}
+			elsif ($t eq "exonic")
+			{
+				for $g (sort keys %{ $annoHash{$t} })
+				{
+					$nucContext = "";
+					$aaContext = "";
+					$consequence = ".";
+
+					if ($info =~ /ANNOVAR_EX=(.*?);ANNOVAR_EX_G=(.*?);/)
+					{
+						$consequence = "$1,$2";		# seems like there is never more than one kind of exonic consequence for a variant, even when multiple genes are affected?
+						for my $isoform (split (/,/, $consequence))
+						{
+							if ($isoform =~ /^$g:(.*?):.*?:(.*?):(.*?)$/)
+							{
+								$nucContext .= "|$1:$2";
+								$aaContext .= "|$1:$3";
+							}
+						}
+						$nucContext =~ s/^\|//;
+						$aaContext =~ s/^\|//;
+
+						$infoHash{$t}{$g}{consequence} = $consequence;
+						$infoHash{$t}{$g}{nuc} = $nucContext;
+						$infoHash{$t}{$g}{aa} = $aaContext;
+					}
+					else
+					{
+						%infoHash = ();
+					}
+				}
+			}
+		}
+
+
+	}
+	else
+	{
+		%infoHash = ();
+	}
+
+	return %infoHash;
+
+}
