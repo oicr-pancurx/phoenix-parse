@@ -14,7 +14,6 @@ my $normal = $ARGV[2];		# PCSI_0218_Ly_R
 my $normalPath = $resultsPath;
 $normalPath =~ s/$sample/$normal/;
 
-warn "opening >$rootDir/$resultsPath/${sample}_landing.html\n";
 open (HTML, ">$rootDir/$resultsPath/${sample}_landing.html") or die "Couldn't open $rootDir/$resultsPath/${sample}_landing.html\n";
 
 print HTML "<a href=\"$hpc/$resultsPath/${sample}_summary.html\">Genomics Summary</a><br>\n";
@@ -24,8 +23,8 @@ print HTML "<a href=\"$hpc/$resultsPath/${sample}.trials.html\">Clinical Trials 
 print HTML "<br>\n";
 print HTML "<a href=\"$hpc/$resultsPath/../final_strelka-mutect/${sample}.final.vcf.html\">Old Somatic VCF file Summary</a><br>\n";
 print HTML "<a href=\"$hpc/$resultsPath/../celluloid/v11.2/\">Celluloid Directory</a><br>\n";
-print HTML "<a href=\"$hpc/$resultsPath/../collapsed/${sample}.bam\">Tumour BAM File</a><br>\n";
-print HTML "<a href=\"$hpc/$normalPath/../collapsed/${normal}.bam\">Normal BAM File</a><br>\n";
+print HTML "Path to tumour BAM: $hpc/$resultsPath/../collapsed/${sample}.bam<br>\n";
+print HTML "Path to normal BAM: $hpc/$normalPath/../collapsed/${normal}.bam<br>\n";
 
 close HTML;
 
